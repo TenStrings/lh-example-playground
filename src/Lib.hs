@@ -1,25 +1,27 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE InstanceSigs #-}
-{-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE RebindableSyntax #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE DataKinds, InstanceSigs, PartialTypeSignatures, RebindableSyntax, TypeFamilies, TypeOperators, UndecidableInstances, PolyKinds, GADTs #-}
 
 module Lib where
 
 import qualified Control.Concurrent.Chan       as C
 import           GHC.Exts                       ( Constraint )
-import           GHC.TypeLits
-import           Unsafe.Coerce
+import           GHC.TypeLits                   ( Nat )
+import           Unsafe.Coerce                  ( unsafeCoerce )
 import           Prelude                 hiding ( Monad(..) )
 import qualified Prelude                       as P
 import qualified Control.Concurrent            as Conc
-import           Control.Monad.STM
-import           Control.Concurrent.STM.TMVar
-import           Data.Dynamic
-import           System.Exit
+import           Control.Monad.STM              ( atomically )
+import           Control.Concurrent.STM.TMVar   ( newEmptyTMVarIO
+                                                , putTMVar
+                                                , takeTMVar
+                                                )
+import           Data.Dynamic                   ( toDyn
+                                                , Typeable
+                                                , fromDynamic
+                                                , Dynamic
+                                                )
+import           System.Exit                    ( exitWith
+                                                , ExitCode(ExitFailure)
+                                                )
 
 class Effect (m :: k -> * -> *) where
    type Unit m :: k
@@ -32,14 +34,16 @@ class Effect (m :: k -> * -> *) where
    (>>) :: m f a -> m g b -> m (Plus m f g) b
    x >> y = x >>= (\_ -> y)
 
-newtype EMonad (r :: [*]) a = EMonad { getInner :: IO a }
+newtype EMonad (r :: [Op *]) a = EMonad { getInner :: IO a }
+
+data Chan = forall a. MkChan (C.Chan a)
 
 data NonZero = NZ Int deriving (Show)
 {-@ NZ :: {i:Int | i > 0 } -> NonZero @-}
 
-newtype Chan = MkChan (C.Chan Dynamic)
+data Op a = Send a | Receive a
 
-type family Concat (s :: [*]) (t :: [*]) :: r where
+type family Concat (s :: [Op *]) (t :: [Op *]) :: r where
             Concat '[] b = b
             Concat  (a ': s) t = Concat s (a ': t)
 
@@ -64,28 +68,25 @@ print = liftIO . Prelude.print
 
 putStrLn = liftIO . Prelude.putStrLn
 
-send :: Typeable t => Chan -> t -> EMonad '[t] ()
-send (MkChan c) t = EMonad $ C.writeChan c (toDyn t)
+send :: Chan -> t -> EMonad '[Send t] ()
+send (MkChan c) t = EMonad $ C.writeChan (unsafeCoerce c) t
 
--- TODO: I'd like to not use exit there, but I'm not sure how to make liquid haskell believe that it is safe
--- (it kinda is not, because it requires writing it somehow that the next value is tied to the monad)
-recv :: Typeable t => Chan -> EMonad '[t] t
+recv :: Chan -> EMonad '[Receive t] t
 recv (MkChan c) = EMonad $ do
-  v <- C.readChan c
-  case fromDynamic v of
-    Just t  -> t
-    Nothing -> exitWith $ ExitFailure 1
-  where (>>=) = (P.>>=)
+  C.readChan (unsafeCoerce c)
 
 new :: ((Chan, Chan) -> EMonad env t) -> EMonad env t
 new f = EMonad $ C.newChan P.>>= (\c -> getInner $ f (MkChan c, MkChan c))
 
--- check that both use the same types
-type family Same (s :: [*]) (t :: [*]) :: Constraint where
-  Same (x ': xs) (y ': ys) = (x ~ y, Same xs ys)
-  Same '[] '[] = ()
+type family Dual s where
+  Dual (Send a) = Receive a
+  Dual (Receive a) = Send a
 
-par :: Same env env' => EMonad env () -> EMonad env' () -> EMonad '[] ()
+type family Balanced (s :: [Op *]) (t :: [Op *]) :: Constraint where
+  Balanced (x ': xs) (y ': ys) = (x ~ Dual y, Balanced xs ys)
+  Balanced '[] '[] = ()
+
+par :: Balanced env env' => EMonad env () -> EMonad env' () -> EMonad '[] ()
 par (EMonad x) (EMonad y) = EMonad $ do
   res  <- newEmptyTMVarIO
   res' <- newEmptyTMVarIO
@@ -111,9 +112,15 @@ divServer c d = do
   (NZ y) <- recv c
   send d (x `div` y)
 
+-- uncommenting any of these makes the code unsafe, otherwise it is safe
 -- divClient :: _ -> _ -> _
+-- divClient
+--   :: Show a
+--   => Chan
+--   -> Chan
+--   -> EMonad '[ 'Send Int, 'Send NonZero, 'Receive a] ()
 divClient c d = do
   send c (2 :: Int)
   send c (NZ 0)
   answer <- recv d
-  Lib.putStrLn $ "result " ++ show answer
+  Lib.putStrLn $ "answer " ++ show answer
