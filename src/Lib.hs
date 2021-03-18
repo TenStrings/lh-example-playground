@@ -1,47 +1,34 @@
-{-# LANGUAGE DataKinds, InstanceSigs, RebindableSyntax, TypeFamilies, UndecidableInstances, PolyKinds, PartialTypeSignatures #-}
+{-# LANGUAGE DataKinds, TypeFamilies, UndecidableInstances, PolyKinds, PartialTypeSignatures, RankNTypes #-}
 
 module Lib where
 
-import           GHC.Exts                       ( Constraint )
-import           Prelude                 hiding ( Monad(..) )
-import qualified Prelude                       as P
-
-class Effect (m :: k -> * -> *) where
-   type Unit m :: k
-   type Plus m (f :: k) (g :: k) :: k
-
-   return :: a -> m (Unit m) a
-
-   (>>=) :: m f a -> (a -> m g b) -> m (Plus m f g) b
-
-   (>>) :: m f a -> m g b -> m (Plus m f g) b
-   x >> y = x >>= (\_ -> y)
+import           Prelude
 
 newtype EMonad (r :: ()) a = EMonad { getInner :: IO a }
 
-instance Effect EMonad where
-  type Plus EMonad s t = '()
-  type Unit EMonad = '()
+type family Plus (e :: k -> * -> *) (f :: k) (g :: k) :: k where
+  Plus EMonad _ _ = '()
 
-  return :: a -> EMonad (Unit EMonad) a
-  return a = EMonad (P.return a)
-
-  (>>=) :: EMonad s a -> (a -> EMonad t b) -> EMonad (Plus EMonad s t) b
-  x >>= k = EMonad ((P.>>=) (getInner x) (getInner . k))
-
-send ::  t -> EMonad '() ()
-send _ = EMonad $ P.return ()
+type family Unit (e :: k -> * -> *) :: k where
+  Unit EMonad = '()
 
 data NonZero = NZ Int deriving (Show)
 {-@ NZ :: {i:Int | i > 0 } -> NonZero @-}
 
-mainFunc = getInner $ divClient 1
+-- with this annotation is safe (without the divClient annotations)
+eBind :: EMonad s a -> (a -> EMonad t b) -> EMonad (Plus EMonad s t) b
+-- with this one is unsafe regardless of divClient's
+-- eBind :: EMonad s a -> (a -> EMonad t b) -> EMonad '() b
+-- without any annotations here is also unsafe regardless of divClient's
+eBind x k = EMonad ((>>=) (getInner x) (getInner . k))
 
--- uncommenting any of these makes the code unsafe, otherwise it is safe
--- divClient :: _ -> _
+-- with any of this annotations is unsafe (without it is safe)
 -- divClient ::  Int -> EMonad '() ()
--- {-@ divClient ::  forall p. p -> EMonad _ () @-}
+-- divClient ::  _ -> _
+divClient _ = send (NZ 0) `eBind` (\_ -> ret ())
 
-divClient _ = do
-  send (NZ 0)
-  return ()
+send :: t -> EMonad '() ()
+send _ = EMonad $ return ()
+
+ret :: a -> EMonad (Unit EMonad) a
+ret a = EMonad (return a)
