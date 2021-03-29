@@ -22,22 +22,27 @@ description:         Please see the README on GitHub at <https://github.com/gith
 dependencies:
 - liquid-base
 - liquidhaskell
+- liquid-prelude
+- liquid-containers
 - stm
 
 ghc-options:
+- -Wall
 - -fplugin=LiquidHaskell
+- -fplugin-opt=LiquidHaskell:--short-names # make errors more readable
+- -fplugin-opt=LiquidHaskell:--counter-examples
 
 library:
   source-dirs: src
 
-# executables:
-#   main-exe:
-#     main:                Main.hs
-#     source-dirs:         app
-#     ghc-options:
-#     - -rtsopts
-#     - -with-rtsopts=-N
-#     - -threaded
-#     - -fplugin=LiquidHaskell
-#     dependencies:
-#     - main
+executables:
+  main-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -rtsopts
+    - -with-rtsopts=-N
+    - -threaded
+    - -fplugin=LiquidHaskell
+    dependencies:
+    - main
