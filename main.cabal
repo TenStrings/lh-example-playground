@@ -1,8 +1,10 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.2.
+-- This file has been generated from package.yaml by hpack version 0.33.0.
 --
 -- see: https://github.com/sol/hpack
+--
+-- hash: c9084ae7122c8fb6b8916b42102a3300cb70d7ccd06ff3ea8e0a8bab4122a118
 
 name:           main
 version:        0.1.0.0
@@ -25,14 +27,34 @@ source-repository head
 
 library
   exposed-modules:
+      Ex1
+      Ex2
       Lib
   other-modules:
       Paths_main
   hs-source-dirs:
       src
-  ghc-options: -fplugin=LiquidHaskell
+  ghc-options: -Wall -fplugin=LiquidHaskell -fplugin-opt=LiquidHaskell:--short-names -fplugin-opt=LiquidHaskell:--counter-examples
   build-depends:
       liquid-base
+    , liquid-containers
+    , liquid-prelude
     , liquidhaskell
+    , stm
+  default-language: Haskell2010
+
+executable main-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_main
+  hs-source-dirs:
+      app
+  ghc-options: -Wall -fplugin=LiquidHaskell -fplugin-opt=LiquidHaskell:--short-names -fplugin-opt=LiquidHaskell:--counter-examples -rtsopts -with-rtsopts=-N -threaded -fplugin=LiquidHaskell
+  build-depends:
+      liquid-base
+    , liquid-containers
+    , liquid-prelude
+    , liquidhaskell
+    , main
     , stm
   default-language: Haskell2010

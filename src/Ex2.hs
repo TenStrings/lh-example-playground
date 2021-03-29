@@ -1,6 +1,7 @@
+
 {-# LANGUAGE DataKinds, RankNTypes, InstanceSigs, PartialTypeSignatures, RebindableSyntax, TypeFamilies, TypeOperators, UndecidableInstances, PolyKinds, GADTs #-}
 
-module Ex1 where
+module Ex2 where
 
 import qualified Control.Concurrent.Chan       as C
 import           GHC.Exts                       ( Constraint )
@@ -14,6 +15,8 @@ import           Control.Concurrent.STM.TMVar   ( newEmptyTMVarIO
                                                 , putTMVar
                                                 , takeTMVar
                                                 )
+import Data.Set
+
 class Effect (m :: k -> * -> *) where
    type Unit m :: k
    type Plus m (f :: k) (g :: k) :: k
@@ -27,7 +30,7 @@ class Effect (m :: k -> * -> *) where
 
 newtype EMonad (r :: [Op *]) a = EMonad { getInner :: IO a }
 
-data Chan = forall a. MkChan (C.Chan a)
+data Chan = forall a. MkChan { chan:: C.Chan a, ghost:: Set (Int, Int) }
 
 data NonZero = NZ Int deriving (Show)
 {-@ NZ :: {i:Int | i > 0 } -> NonZero @-}
@@ -60,14 +63,14 @@ print = liftIO . P.print
 putStrLn = liftIO . P.putStrLn
 
 send :: Chan -> t -> EMonad '[ 'Send t] ()
-send (MkChan c) t = EMonad $ C.writeChan (unsafeCoerce c) t
+send (MkChan c _) t = EMonad $ C.writeChan (unsafeCoerce c) t
 
 recv :: Chan -> EMonad '[ 'Receive t] t
-recv (MkChan c) = EMonad $ do
+recv (MkChan c _) = EMonad $ do
   C.readChan (unsafeCoerce c)
 
 new :: ((Chan, Chan) -> EMonad env t) -> EMonad env t
-new f = EMonad $ C.newChan P.>>= (\c -> getInner $ f (MkChan c, MkChan c))
+new f = EMonad $ C.newChan P.>>= (\c -> getInner $ f (MkChan c empty, MkChan c empty))
 
 type family Dual s where
   Dual ('Send a) = 'Receive a
@@ -102,35 +105,15 @@ divProc =
 
 -- divServer :: Chan -> Chan -> EMonad '[ 'Receive Int, 'Receive NonZero, 'Send (CheckedDivT 4 2)] ()
 -- unsound u.u
--- esto debería fallar, pero no falla.
-divServer :: Chan -> Chan -> EMonad '[ 'Receive Int, 'Receive NonZero, 'Send (CheckedDivT 4 2)] ()
+divServer :: Chan -> Chan -> EMonad '[ 'Receive Int, 'Receive NonZero, 'Send Int] ()
 divServer c d = do
   x      <- recv c
   (NZ y) <- recv c
-  send d (CheckedDiv x y (x `div` y) :: CheckedDivT 4 2)
+  send d (x `div` y)
 
-divClient :: Chan -> Chan -> EMonad '[ 'Send Int, 'Send NonZero, 'Receive (CheckedDivT 4 2)] ()
+divClient :: Chan -> Chan -> EMonad '[ 'Send Int, 'Send NonZero, 'Receive Int] ()
 divClient c d = do
   send c (4 :: Int)
   send c (NZ 2)
   answer <- recv d
-  putStrLn $ "answer " ++ show (r answer)
-
--- testUnsafe :: CheckedDivT 10 5 
--- testUnsafe = CheckedDiv 10 5 3 
--- 
--- testUnsafe' :: CheckedDivT 10 5 
--- testUnsafe' = CheckedDiv 10 0 2 
--- 
--- testUnsafe'' :: CheckedDivT 10 5 
--- testUnsafe'' = CheckedDiv 15 5 3 
-
-
-testSafe = CheckedDiv 15 5 (15 `div` 5) 
-
-data CheckedDivT (n1 :: Nat) (d :: Nat)
-  = CheckedDiv { s :: Int, t :: Int, r :: Int  } deriving Show
-
-
-{-@ CheckedDiv :: forall (n :: Nat). forall (d :: Nat). 
-        {s: Int | s ~~ n1 } -> {t: Int | t ~~ d && t != 0 } -> {r:Int | r = s / t } -> CheckedDivT n d @-}
+  putStrLn $ "answer " ++ show answer

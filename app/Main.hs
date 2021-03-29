@@ -1,6 +1,9 @@
 module Main where
 
-import Lib
+-- import Lib (mainFunc)
+import Ex1 (mainFunc)
+import Prelude
 
 main :: IO ()
-main = mainFunc
+main = putStrLn "hello" >> 
+    Ex1.mainFunc
